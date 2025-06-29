@@ -28,15 +28,24 @@ else:
     # --- 데이터 로딩 함수 (수정됨) ---
     @st.cache_data(ttl=60)
     def get_checklist_data():
-        profiles = supabase.table('profiles').select('id, full_name').order('full_name').execute().data
-        # [수정] '*' 대신 필요한 컬럼만 명확하게 지정합니다.
-        items = supabase.table('checklist_items').select('id, content, target_user, deduction_points').eq('is_active', True).execute().data
-        return profiles, items
+        try:
+            profiles = supabase.table('profiles').select('id, full_name').order('full_name').execute().data
+            # [수정] eq 필터에 사용된 'is_active' 컬럼을 select 목록에 추가했습니다.
+            items = supabase.table('checklist_items').select('id, content, target_user, deduction_points, is_active').eq('is_active', True).execute().data
+            return profiles, items
+        except Exception as e:
+            st.error("체크리스트 데이터를 불러오는 데 실패했습니다.")
+            st.exception(e)
+            return [], []
 
     profiles, items = get_checklist_data()
 
-    if not profiles or not items:
-        st.warning("사용자 또는 체크리스트 항목이 등록되지 않았습니다. 관리자에게 문의하세요.")
+    # 데이터 로딩 실패 시 앱 중단
+    if not profiles:
+        st.warning("사용자 프로필 정보가 없습니다. 관리자에게 문의하세요.")
+        st.stop()
+    if not items:
+        st.warning("체크리스트 항목이 없습니다. 관리자에게 문의하세요.")
         st.stop()
     
     # --- 날짜 선택 ---
@@ -44,7 +53,7 @@ else:
 
     # --- 아이들별 탭 생성 ---
     profile_map = {p['id']: p['full_name'] for p in profiles}
-    tabs = st.tabs(profile_map.values())
+    tabs = st.tabs(list(profile_map.values()))
 
     for i, profile_id in enumerate(profile_map.keys()):
         with tabs[i]:
@@ -53,16 +62,16 @@ else:
 
             user_items = [item for item in items if item['target_user'] in ['공통', full_name]]
             
-            # 체크박스 상태 저장을 위한 session_state 키 생성
             session_key = f"checks_{profile_id}_{check_date}"
             if session_key not in st.session_state:
                 st.session_state[session_key] = {item['id']: True for item in user_items}
 
-            # 체크박스 표시
             for item in user_items:
+                # 날짜가 바뀔 때 체크박스 값을 초기화하기 위한 로직
+                current_value = st.session_state[session_key].get(item['id'], True)
                 st.session_state[session_key][item['id']] = st.checkbox(
                     f"{item['content']} (-{item['deduction_points']}점)", 
-                    value=st.session_state[session_key].get(item['id'], True),
+                    value=current_value,
                     key=f"check_{profile_id}_{item['id']}_{check_date}"
                 )
             
